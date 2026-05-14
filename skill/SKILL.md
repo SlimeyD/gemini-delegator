@@ -49,11 +49,15 @@ Most tasks have a delegable research/analysis phase even when the final conversa
 
 ## How to Delegate
 
+> **Note on paths:** Examples below use `$AI_ORCH_ROOT` to refer to your local
+> checkout of the orchestration toolkit (where `scripts/gemini_agent.py` lives).
+> Set it once in your shell: `export AI_ORCH_ROOT="$HOME/path/to/ai-orchestration"`.
+
 ### Single Task
 
 ```bash
-~/Code/ai-orchestration/scripts/.venv/bin/python3 \
-  ~/Code/ai-orchestration/scripts/gemini_agent.py \
+$AI_ORCH_ROOT/scripts/.venv/bin/python3 \
+  $AI_ORCH_ROOT/scripts/gemini_agent.py \
   --task "Your detailed prompt here" \
   --output /tmp/result.md
 ```
@@ -76,13 +80,13 @@ The model is auto-selected based on task complexity. Only specify `--model` when
 | `--image-file path` | Image understanding input | `--image-file screenshot.png` |
 | `--image-output path` | Image generation output | `--image-output /tmp/logo.png` |
 | `--enable-tools` | Enable Google Search + code execution | Research tasks, data analysis, chart generation |
-| `--enable-mcp` | Enable MCP tools (Linear, Supabase, browser) | `--enable-mcp --mcp-servers linear-ratemyflat` |
+| `--enable-mcp` | Enable MCP tools (Linear, Supabase, browser) | `--enable-mcp --mcp-servers linear-<workspace>` |
 | `--json` | Output result as structured JSON | When you need machine-parseable output |
 | `--capture-thinking` | Return model's reasoning trace | Useful for debugging unexpected outputs |
 
 ### Shell Shortcuts
 
-If the shell integration is sourced (`source ~/Code/ai-orchestration/meta/shell/orchestration.zsh`):
+If the shell integration is sourced (`source $AI_ORCH_ROOT/meta/shell/orchestration.zsh`):
 
 ```bash
 gemini-agent --task "..." --output /tmp/result.md    # Full control
@@ -178,6 +182,32 @@ Output format:
 - Suggested fix"
 ```
 
+## Gemini Skill Awareness — Pass Skill Context Explicitly
+
+Gemini agents are stateless and do not inherit Claude's local skill definitions, tool configurations, or project-specific conventions. When delegating, treat the agent as a cold worker and pass any relevant rules from your active skills into the prompt itself.
+
+**Bad:**
+```
+gemini-agent --task "Create a Linear ticket for the navbar bug on Project X"
+```
+The agent doesn't know which workspace to use, what labels are valid, or how titles are formatted.
+
+**Good:**
+```
+gemini-agent --task "Create a Linear ticket in the '<workspace>' workspace.
+- Title ≤80 chars, prefixed with [UI]
+- Use the 'bug' label, priority 'High'
+- Description must include a 'Steps to Reproduce' section"
+```
+
+**When to pass skill context:**
+- Brand voice or style conventions (per-brand tone, vocabulary, taboo phrases)
+- Multi-workspace tool configurations (Linear, Twenty CRM, etc.)
+- Domain-specific schemas (custom record shapes your project uses)
+- Project-specific naming or labeling rules
+
+Upstream tracking for native skill awareness in Gemini CLI: https://github.com/google-gemini/gemini-cli/issues/11506
+
 ## Validating Gemini Output
 
 This is non-negotiable. Gemini agents are fast but can hallucinate — especially on:
@@ -193,8 +223,8 @@ Use the Bash tool with `run_in_background` for parallel execution:
 
 ```bash
 # Each runs as a separate background task
-~/Code/ai-orchestration/scripts/.venv/bin/python3 \
-  ~/Code/ai-orchestration/scripts/gemini_agent.py \
+$AI_ORCH_ROOT/scripts/.venv/bin/python3 \
+  $AI_ORCH_ROOT/scripts/gemini_agent.py \
   --task "Security review of auth module..." \
   --output /tmp/security-review.md
 
@@ -271,6 +301,7 @@ The `--quality` flag maps to Gemini's thinking configuration:
 - Use Claude Code tools (Read, Edit, Glob, etc.) — use `--context-file` to pass file contents
 - Install custom Python packages (only the 40+ pre-installed ones)
 - Access localhost URLs via URL Context (use MCP + agent-browser instead)
+- **Sustain >~5 tool calls in a single invocation** on free-tier keys. Each MCP tool call is one LLM round trip; the free-tier limit is 5 RPM per project per model. A typical browser smoke test (login → navigate → screenshot → ...) needs 10–15 calls and will hit `429 RESOURCE_EXHAUSTED` mid-workflow. Workarounds: split the workflow into ≤4-call agents with `sleep 60` between (note: puppeteer state doesn't persist), use a paid-tier key, or drive the browser from the parent Claude session. See `$AI_ORCH_ROOT/docs/known-issues/MCP_PUPPETEER_RATE_LIMIT.md`.
 
 ## Works With Other Skills
 
