@@ -4,7 +4,27 @@ import os
 import random
 import sys
 import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# Free-tier RPD limits per model, per project. Verified empirically 2026-05-20.
+# Resets at midnight Pacific (UTC-8).
+FREE_TIER_RPD = {
+    "gemini-3.5-flash": 20,
+    "gemini-3-flash-preview": 20,
+    "gemini-2.5-flash": 20,
+    "gemini-2.5-flash-lite": 20,
+    "gemini-3.1-flash-lite-preview": 500,
+    "gemma-4-31b-it": 1500,
+    "gemma-4-26b-a4b-it": 1500,
+    "gemini-embedding-001": 1000,
+    "gemini-embedding-2": 1000,
+}
+
+
+def _pacific_date() -> str:
+    """Return today's date in Pacific time (RPD reset boundary) as YYYY-MM-DD."""
+    return datetime.now(timezone(timedelta(hours=-8))).strftime("%Y-%m-%d")
 
 # Import package-aware path utilities
 try:
@@ -334,21 +354,72 @@ class KeyPoolManager:
             self._save_usage()
         return cleared
 
-    def update_usage(self, key_id, usage_data):
+    def update_usage(self, key_id, usage_data, model: str = None):
         if key_id not in self.usage:
             self.usage[key_id] = {"total_requests": 0, "history": []}
-            
+
         self.usage[key_id]["total_requests"] += usage_data.get("requests", 0)
         self.usage[key_id]["history"].append({
             "timestamp": time.time(),
-            "usage": usage_data
+            "usage": usage_data,
+            "model": model,
         })
+
+        # Per-model daily counter (resets at midnight Pacific).
+        if model:
+            today = _pacific_date()
+            daily = self.usage[key_id].get("daily_by_model", {})
+            day_block = daily.get(today, {})
+            day_block[model] = day_block.get(model, 0) + usage_data.get("requests", 1)
+            daily[today] = day_block
+            for old in [d for d in daily if d < today][:-2]:
+                daily.pop(old, None)
+            self.usage[key_id]["daily_by_model"] = daily
 
         # Prune old history entries to prevent unbounded growth
         if len(self.usage[key_id]["history"]) > MAX_HISTORY_ENTRIES:
             self.usage[key_id]["history"] = self.usage[key_id]["history"][-MAX_HISTORY_ENTRIES:]
 
         self._save_usage()
+
+    def get_daily_usage(self, key_id: str, model: str) -> int:
+        """Return today's request count for (key, model). 0 if never used today."""
+        today = _pacific_date()
+        return (self.usage.get(key_id, {})
+                          .get("daily_by_model", {})
+                          .get(today, {})
+                          .get(model, 0))
+
+    def explain_routing(self, provider: str, model: str = None) -> dict:
+        """Return a snapshot of pool state useful for diagnostics.
+
+        Shows availability, today's request count per key, free-tier RPD
+        headroom remaining, and how long since each key was last used.
+        """
+        if provider not in self.config["providers"]:
+            raise ValueError(f"Provider {provider} not found")
+        keys = self.config["providers"][provider].get("keys", [])
+        rpd_limit = FREE_TIER_RPD.get(model) if model else None
+        rows = []
+        for k in keys:
+            key_id = k["id"]
+            used_today = self.get_daily_usage(key_id, model) if model else 0
+            remaining = (rpd_limit - used_today) if rpd_limit else None
+            rows.append({
+                "key_id": key_id,
+                "project": k.get("project_name", ""),
+                "available": self._is_available(key_id),
+                "last_used_age_s": int(time.time() - self._last_used(key_id))
+                                    if self._last_used(key_id) else None,
+                "used_today_for_model": used_today,
+                "remaining_today": remaining,
+            })
+        return {
+            "provider": provider,
+            "model": model,
+            "free_tier_rpd": rpd_limit,
+            "keys": rows,
+        }
 
 if __name__ == "__main__":
     import sys

@@ -125,50 +125,87 @@ def log_execution(task_summary: str, result: dict, task_type: str = "text",
 
 # Model name mappings (router names → API names)
 # Reference: https://ai.google.dev/gemini-api/docs/models
-# Updated: 2026-03-10 - Prioritizing Gemini 3.1 Flash Lite (500 RPD)
+# Verified empirically 2026-05-20 against live keys. All Gemma 3 names
+# return 404 (retired); Gemma 4 only with the -it suffix.
 MODEL_MAP = {
-    # Gemini 3.1 Family (Latest)
-    "gemini-3.1-pro": "gemini-3.1-pro-preview",
+    # Gemini 3.5 Family (released Google I/O 2026-05-19 — free tier eligible)
+    "gemini-3.5-flash": "gemini-3.5-flash",
+
+    # Gemini 3.1 Family
+    "gemini-3.1-pro": "gemini-3.1-pro-preview",                   # PAID ONLY
     "gemini-3.1-pro-customtools": "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-flash": "gemini-3.1-flash-lite-preview",
     "gemini-3.1-flash-lite": "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-flash-image": "gemini-3.1-flash-image-preview",
+    "gemini-3.1-flash-image": "gemini-3.1-flash-image-preview",   # PAID ONLY (Nano Banana 2)
 
-    # Gemini 3 Family (Standard Flash/Pro)
+    # Gemini 3 Family
     "gemini-3-flash": "gemini-3-flash-preview",
-    "gemini-3-pro": "gemini-3-pro-preview",
-    "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
+    "gemini-3-pro": "gemini-3-pro-preview",                       # PAID ONLY
+    "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",   # PAID ONLY (Nano Banana Pro)
 
-    # Gemini 2.5 Family (Stable)
+    # Gemini 2.5 Family
     "gemini-2.5-flash": "gemini-2.5-flash",
-    "gemini-2.5-pro": "gemini-2.5-pro",
-    "gemini-2.5-flash-image": "gemini-2.5-flash-image",
+    "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+    "gemini-2.5-pro": "gemini-2.5-pro",                           # PAID ONLY (despite docs claim)
+    "gemini-2.5-flash-image": "gemini-2.5-flash-image",           # PAID ONLY (Nano Banana)
 
-    # Gemma 3 Family (Micro-tasks)
-    "gemma-3-1b": "gemma-3-1b",
-    "gemma-3-4b": "gemma-3-4b",
-    "gemma-3-12b": "gemma-3-12b",
-    "gemma-3-27b": "gemma-3-27b",
+    # Gemma 4 Family (replaces retired Gemma 3 — -it suffix required)
+    "gemma-4-31b": "gemma-4-31b-it",          # 15 RPM, UNLIMITED TPM, 1.5K RPD — batch workhorse
+    "gemma-4-31b-it": "gemma-4-31b-it",
+    "gemma-4-26b": "gemma-4-26b-a4b-it",      # smaller MoE
+    "gemma-4-26b-a4b-it": "gemma-4-26b-a4b-it",
 
-    # Embedding model
+    # Embedding models
     "gemini-embedding-001": "gemini-embedding-001",
+    "gemini-embedding-2": "gemini-embedding-2",
 }
 
-# Fallback chain when all keys for a model are quota-exhausted.
-# Skips Pro models (0 RPD on free tier). Flash → Flash only.
-# Only triggered when ALL keys return 429/RESOURCE_EXHAUSTED.
+# Paid-only models — gated behind --allow-paid. Empirically verified
+# 2026-05-20: every free-tier key returns 429 RESOURCE_EXHAUSTED.
+PAID_ONLY_MODELS = {
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-pro-preview-customtools",
+    "gemini-3-pro-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-image",
+    "gemini-3-pro-image-preview",
+    "gemini-3.1-flash-image-preview",
+    "imagen-4.0-fast-generate-001",
+    "imagen-4.0-generate-001",
+    "imagen-4.0-ultra-generate-001",
+    "veo-2.0-generate-001",
+    "veo-3.0-generate-001",
+    "veo-3.0-fast-generate-001",
+    "veo-3.1-generate-preview",
+    "veo-3.1-fast-generate-preview",
+    "veo-3.1-lite-generate-preview",
+    "lyria-3-clip-preview",
+    "lyria-3-pro-preview",
+    "gemini-2.5-computer-use-preview-10-2025",
+    "deep-research-max-preview-04-2026",
+    "deep-research-preview-04-2026",
+    "deep-research-pro-preview-12-2025",
+}
+
+# Models that reject any thinking_config (400 INVALID_ARGUMENT).
+MODELS_WITHOUT_THINKING = {
+    "gemma-4-31b-it",
+    "gemma-4-26b-a4b-it",
+    "gemini-embedding-001",
+    "gemini-embedding-2",
+}
+
+# Fallback chain. Paid Pros fall to free 3.5 Flash so unauthorised users
+# get free-tier behaviour instead of a silent paid charge.
 MODEL_FALLBACK = {
-    # Pro models fall through to Flash immediately
-    "gemini-3.1-pro-preview": "gemini-3-flash-preview",
-    "gemini-3-pro-preview": "gemini-3-flash-preview",
-    # Flash chain: most capable → highest quota
-    "gemini-3-flash-preview": "gemini-2.5-flash",
+    "gemini-3.1-pro-preview": "gemini-3.5-flash",
+    "gemini-3-pro-preview": "gemini-3.5-flash",
+    "gemini-2.5-pro": "gemini-3.5-flash",
+    "gemini-3.5-flash": "gemini-3-flash-preview",
+    "gemini-3-flash-preview": "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash": "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-flash-lite-preview": None,
-    "gemma-3-1b": "gemma-3-4b",
-    "gemma-3-4b": "gemma-3-12b",
-    "gemma-3-12b": "gemma-3-27b",
-    "gemma-3-27b": "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite-preview": "gemma-4-31b-it",
+    "gemma-4-31b-it": None,
 }
 
 # Supported image MIME types for understanding

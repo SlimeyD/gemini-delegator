@@ -118,19 +118,33 @@ The system parses Google's error messages to determine exactly how long to block
 
 ### Model Fallback Chain
 When a model is requested, the system attempts to fulfill it using the best available key. If the pool is empty for that model, it falls back:
-\`Gemini 3.1 Pro\` → \`Gemini 3 Flash\` → \`Gemini 2.5 Flash\` → \`Gemini 3.1 Flash Lite\` → \`Stop\`
+\`Gemini 3.5 Flash\` → \`Gemini 3 Flash\` → \`Gemini 3.1 Flash Lite\` → \`Gemma 4 31B\` → \`Stop\`
+
+Paid-only models (Pro variants, Nano Banana image models, Veo, Lyria, Computer Use, Deep Research) are gated behind a future \`--allow-paid\` flag and otherwise short-circuit to free equivalents.
 
 ---
 
-## March 2026 Free Tier Reference
-The system is pre-configured with the latest verified limits:
+## May 2026 Free Tier Reference (post Google I/O)
+Verified empirically against live keys 2026-05-20. Limits are **per Google Cloud project** — multiple keys in one project share one bucket.
 
-| Model | RPM | TPM | RPD | Scaled (18 Keys) |
+| Model | RPM | TPM | RPD | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Gemini 3.1 Flash Lite** | 15 | 250K | 500 | 9,000 RPD |
-| **Gemini 3 Flash** | 5 | 250K | 20 | 360 RPD |
-| **Gemma 3 (1B-27B)** | 30 | 15K | 14.4K | 259K RPD |
-| **Gemini 3.1 Pro** | 0* | 0* | 0* | Requires Paid Plan |
+| **Gemini 3.5 Flash** | 5 | 250K | 20 | New (I/O 2026), default choice |
+| **Gemini 3.1 Flash Lite** | 15 | 250K | 500 | Best free quota — the workhorse |
+| **Gemini 3 Flash** | 5 | 250K | 20 | Backup |
+| **Gemini 2.5 Flash** | 5 | 250K | 20 | Required for Search grounding (paid on 3.x) |
+| **Gemma 4 31B** | 15 | **Unlimited** | 1,500 | Batch + extraction (unlimited TPM!) |
+| **Gemini 3.1 / 3 / 2.5 Pro** | 0 | 0 | 0 | Paid plan required |
+| **Nano Banana, Veo, Lyria, Computer Use, Deep Research** | 0 | 0 | 0 | Paid plan required |
+
+### Key restriction deadline — June 19, 2026
+Google will block unrestricted API keys on **June 19, 2026** ([source](https://ai.google.dev/gemini-api/docs/api-key#secure-unrestricted-api-keys)). Every key must be restricted to "Generative Language API" via [AI Studio](https://aistudio.google.com/api-keys) before then. Use the included audit tool to track readiness:
+
+\`\`\`bash
+python3 -m gemini_key_pool.audit_keys
+\`\`\`
+
+This pings every \`*_GEMINI_API_KEY_*\` and \`GEMINI_API_KEY_*\` in your .env, classifies each as alive/blocked/expired/exhausted, and writes a per-project status report to \`logs/key-audit-YYYY-MM-DD.md\`.
 
 ---
 
