@@ -1,6 +1,6 @@
-# Gemini Key Pool
+# gemini-delegator
 
-**Gemini Key Pool** is a high-throughput management system for the Google Gemini API. It allows you to pool multiple API keys from different GCP projects to make the most of free-tier rate limits and provide a resilient, high-availability AI service.
+**Gemini Delegator** is a high-throughput agent deployment skill for the Google Gemini API. It allows you to pool multiple API keys from different GCP projects to make the most of free-tier rate limits and provide a resilient, high-availability AI service.
 
 ---
 
