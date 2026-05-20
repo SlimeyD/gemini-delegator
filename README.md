@@ -10,7 +10,7 @@ Google's Gemini Free Tier is powerful but strictly limited (e.g., 500 requests p
 
 *   **Smart Key Rotation**: Uses Least-Recently-Used (LRU) selection to distribute load evenly across your pool.
 *   **Fail-Safe Rate Limiting**: Automatically detects \`429 RESOURCE_EXHAUSTED\` errors and puts individual keys on tiered cooldowns (RPM, TPM, RPD).
-*   **Model Fallback**: If your best model (e.g., Flash 3.0) is completely exhausted across all keys, the system automatically falls back to a high-quota alternative (e.g., Flash 3.1 Lite).
+*   **Model Fallback**: If your best model (e.g., Flash 3.5) is completely exhausted across all keys, the system automatically falls back to the next best model or a high quota alternative (e.g., Flash 3.0 or Flash 3.1 Lite).
 *   **Concurrency Safety**: Built for parallel execution. Atomic reservations (\`reserve_key\`) prevent multiple agents from "thundering herd" on the same key.
 *   **Persistent Usage Tracking**: Remembers rate-limit states across restarts using a file-locked JSON database.
 
@@ -21,7 +21,8 @@ Google's Gemini Free Tier is powerful but strictly limited (e.g., 500 requests p
 ### 1. Prerequisites
 *   Python 3.10+
 *   Multiple Gemini API keys (create them at [Google AI Studio](https://aistudio.google.com/app/apikey))
-    *   Please note, limits apply per project - you can create up to 8 projects with their own Gemini API keys which can be added with their own names to your .env file.
+    *   Please note, limits apply per project - you can create up to 8 projects each with their own Gemini API key which can be given arbitrary names in your .env file.
+    *   Please note: These will need to be mapped inside the keys.json file once set up to ensure the model_router.py is calling the right keys
 
 ### 2. Installation
 \`\`\`bash
@@ -130,8 +131,8 @@ Verified empirically against live keys 2026-05-20. Limits are **per Google Cloud
 | Model | RPM | TPM | RPD | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **Gemini 3.5 Flash** | 5 | 250K | 20 | New (I/O 2026), default choice |
-| **Gemini 3.1 Flash Lite** | 15 | 250K | 500 | Best free quota — the workhorse |
 | **Gemini 3 Flash** | 5 | 250K | 20 | Backup |
+| **Gemini 3.1 Flash Lite** | 15 | 250K | 500 | Best free quota — the workhorse |
 | **Gemini 2.5 Flash** | 5 | 250K | 20 | Required for Search grounding (paid on 3.x) |
 | **Gemma 4 31B** | 15 | **Unlimited** | 1,500 | Batch + extraction (unlimited TPM!) |
 | **Gemini 3.1 / 3 / 2.5 Pro** | 0 | 0 | 0 | Paid plan required |
