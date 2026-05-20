@@ -186,7 +186,9 @@ def main() -> int:
                 r = probe_model(label, key, model)
                 out.append(r)
                 print(f"  {label:14} {model:36} → {status_glyph(r):10} ({r.latency_ms}ms)", flush=True)
-                time.sleep(0.2)
+                # Free tier = 5 RPM per project. Sleep 12s between probes so
+                # quota-driven 429s don't get confused with "model unavailable".
+                time.sleep(12.0)
             return out
 
         futures = [pool.submit(probe_key_serial, label, key) for label, key in KEYS_TO_PROBE if key]

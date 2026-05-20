@@ -372,7 +372,10 @@ class KeyPoolManager:
             day_block = daily.get(today, {})
             day_block[model] = day_block.get(model, 0) + usage_data.get("requests", 1)
             daily[today] = day_block
-            for old in [d for d in daily if d < today][:-2]:
+            # Sort explicitly so the prune is robust to insertion order
+            # (e.g. when usage.json is hand-edited or loaded from a
+            # non-ordered source).
+            for old in sorted(d for d in daily if d < today)[:-2]:
                 daily.pop(old, None)
             self.usage[key_id]["daily_by_model"] = daily
 
