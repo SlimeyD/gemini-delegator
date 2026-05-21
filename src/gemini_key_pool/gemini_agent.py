@@ -15,11 +15,14 @@ Usage:
     python3 -m gemini_key_pool.gemini_agent --task "Describe this image" --image-file photo.jpg --output description.md
 """
 import argparse
+import atexit
 import base64
+import glob
 import json
 import os
 import random
 import sys
+import tempfile
 import time
 from pathlib import Path
 from datetime import datetime
@@ -56,6 +59,30 @@ KEY_RETRY_DELAY_BASE = 1.0
 KEY_RETRY_DELAY_JITTER = 1.0  # random 0–1s added
 # Models that don't support generateContent (e.g. embedding-only models)
 NON_GENERATIVE_MODELS = {"gemini-embedding-001"}
+
+# Substrings that flag a path as "do not send to Gemini" — matched case-insensitively
+# against the full path. Catches the obvious cases; you should still review what
+# you're passing in via --context-file / --context-glob.
+SENSITIVE_FILE_PATTERNS = (
+    ".env",
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    "id_rsa",
+    "id_ed25519",
+    "credentials",
+    "secrets",
+    "private_key",
+    "service-account",
+)
+
+
+def is_sensitive_path(path: str) -> bool:
+    """True if *path* matches any pattern in SENSITIVE_FILE_PATTERNS."""
+    if not path:
+        return False
+    lower = path.lower()
+    return any(p in lower for p in SENSITIVE_FILE_PATTERNS)
 
 # Execution logging - uses package-aware path resolution
 LOG_DIR = get_logs_dir()
@@ -616,9 +643,17 @@ def main():
     parser = argparse.ArgumentParser(
         description="Execute tasks via Gemini API with key pool rotation. Supports text, image generation, and image understanding."
     )
-    parser.add_argument("--task", required=True, help="Task/prompt to execute")
+    parser.add_argument("--task", help="Task/prompt to execute (use --task-file for multi-line prompts)")
+    parser.add_argument("--task-file",
+                       help="Read the task prompt from a file instead of --task. Eliminates shell-escape "
+                            "issues with multi-line / quote-heavy prompts.")
     parser.add_argument("--model", help="Model to use (auto-selected if not specified)")
-    parser.add_argument("--context-file", help="File with additional text context")
+    parser.add_argument("--context-file", action="append", default=[],
+                       help="File with additional text context. Repeat the flag to pass multiple files "
+                            "(they are concatenated with `## Context: <path>` headers).")
+    parser.add_argument("--context-glob", action="append", default=[],
+                       help="Glob pattern resolved against the current directory; matched files are added "
+                            "to the context. Repeatable. Combines with --context-file.")
     parser.add_argument("--output", help="Output file path for text results")
     parser.add_argument("--image-file", help="Input image file for understanding tasks")
     parser.add_argument("--image-output", help="Output path for generated images")
@@ -632,6 +667,51 @@ def main():
     parser.add_argument("--json", action="store_true", help="Output result as JSON")
 
     args = parser.parse_args()
+
+    # --task / --task-file: exactly one must be provided
+    if args.task_file:
+        if args.task:
+            parser.error("Use --task OR --task-file, not both")
+        if not os.path.exists(args.task_file):
+            parser.error(f"--task-file not found: {args.task_file}")
+        with open(args.task_file, 'r') as _f:
+            args.task = _f.read()
+    if not args.task:
+        parser.error("Must provide --task or --task-file")
+
+    # --context-file (multi) + --context-glob: collect all paths, filter
+    # sensitive/missing entries once, then aggregate >1 entries into a temp
+    # file so the downstream context-loading code stays untouched.
+    _raw_paths = list(args.context_file or [])
+    for _pattern in (args.context_glob or []):
+        _raw_paths.extend(sorted(glob.glob(_pattern, recursive=True)))
+
+    _context_paths = []
+    for _p in _raw_paths:
+        if is_sensitive_path(_p):
+            print(f"🛡️  Refusing to read sensitive context file: {_p}")
+            continue
+        if not os.path.exists(_p):
+            print(f"⚠️  Skipping missing context file: {_p}")
+            continue
+        _context_paths.append(_p)
+
+    if len(_context_paths) > 1:
+        _tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', prefix='gemini-ctx-', delete=False
+        )
+        atexit.register(
+            lambda p: os.path.exists(p) and os.unlink(p), _tmp.name
+        )
+        for _p in _context_paths:
+            _tmp.write(f"\n\n## Context: {_p}\n\n")
+            with open(_p, 'r') as _f:
+                _tmp.write(_f.read())
+        _tmp.close()
+        args.context_file = _tmp.name
+        print(f"📎 Aggregated {len(_context_paths)} context files into {_tmp.name}")
+    else:
+        args.context_file = _context_paths[0] if _context_paths else None
 
     # Determine task type for display
     task_type = "text"
