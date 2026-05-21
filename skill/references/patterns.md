@@ -157,6 +157,35 @@ Agent 3 (Polisher): claude-sonnet → publication-ready
 
 ---
 
+## Structured Debate (Glass Box Asymmetric)
+
+Two agents argue toward convergence under a Proposer / Critic protocol with
+shared reasoning traces. An optional Judge calls convergence.
+
+```
+Round 1: Proposer (with CoT trace) ──► Critic ──► Critic critique (with CoT)
+Round 2: Proposer responds / concedes ──► Critic ──► ...
+... Judge declares convergence ─► Final answer
+```
+
+**When to use:**
+- High-stakes decisions where a single agent's first answer is risky
+- Topics where adversarial pressure improves output (correctness reviews, ambiguous specs)
+- You want the reasoning trace alongside the conclusion (audit / explainability)
+
+**Implementation sketch:**
+1. Dispatch Proposer (`gemini-3-pro` or `gemini-3.5-flash`) with the task plus an instruction to emit `## Reasoning` alongside `## Answer`.
+2. Dispatch Critic with the Proposer's full output and the prompt "find at least one substantive flaw with the reasoning, not just the conclusion."
+3. Re-dispatch Proposer with the critique; it either defends with new reasoning or concedes.
+4. Loop until a Judge agent (cheap model — `gemini-3.1-flash-lite`) declares convergence, OR a `--rounds` cap is hit.
+
+Keep the Proposer/Critic on the same model to keep the comparison fair; the Judge can be cheaper.
+
+**Trade-offs:** Highest reasoning rigor | 2–3× the requests of a single
+delegation; usually pricier models for Proposer/Critic.
+
+---
+
 ## Pattern Selection Guide
 
 | Situation | Pattern |
@@ -166,6 +195,7 @@ Agent 3 (Polisher): claude-sonnet → publication-ready
 | Complex planning + specialized work | Hierarchical |
 | Creative brainstorming + evaluation | Double-Diamond |
 | Iterative refinement | Handoff Chain |
+| High-stakes decision needing adversarial pressure | Structured Debate |
 | Quota-constrained | Sequential or Handoff |
 
 ---
